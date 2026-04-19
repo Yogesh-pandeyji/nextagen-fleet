@@ -4,75 +4,91 @@ import { useStore } from '../../store/useStore'
 import { supabase } from '../../lib/supabase'
 
 export default function SettingsScreen() {
-  const { company: storeCompany, user, setCompany } = useStore()
+  const { company: storeCompany, user, setCompany: setStoreCompany } = useStore()
   const [company, setLocalCompany] = useState(null)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [toast, setToast] = useState(null) // { type: 'success'|'error', msg }
+  const [toast, setToast] = useState(null)
   const [form, setForm] = useState({})
   const [logoPreview, setLogoPreview] = useState(null)
   const fileRef = useRef(null)
 
-  // Always fetch company directly from Supabase on mount
-  useEffect(() => {
-    fetchCompany()
-  }, [])
+  useEffect(() => { fetchCompany() }, [])
 
   const fetchCompany = async () => {
     setLoading(true)
     try {
-      // Get the current user's company via company_users join
-      const { data: { user: authUser } } = await supabase.auth.getUser()
-      if (!authUser) { setLoading(false); return }
-
-      const { data: cuRow } = await supabase
-        .from('company_users')
-        .select('company_id')
-        .eq('user_id', authUser.id)
-        .single()
-
-      if (!cuRow?.company_id) { setLoading(false); return }
-
-      const { data: comp, error } = await supabase
+      // Strategy 1: Query companies directly — RLS ensures user sees only their company
+      const { data: comps, error: e1 } = await supabase
         .from('companies')
         .select('*')
-        .eq('id', cuRow.company_id)
-        .single()
+        .limit(1)
 
-      if (!error && comp) {
-        setLocalCompany(comp)
-        if (typeof setCompany === 'function') setCompany(comp)
+      if (!e1 && comps && comps.length > 0) {
+        setLocalCompany(comps[0])
+        if (typeof setStoreCompany === 'function') setStoreCompany(comps[0])
+        setLoading(false)
+        return
+      }
+
+      // Strategy 2: Try company_users join
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        const { data: cu } = await supabase
+          .from('company_users')
+          .select('company_id')
+          .eq('user_id', authUser.id)
+          .maybeSingle()
+
+        if (cu?.company_id) {
+          const { data: comp } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('id', cu.company_id)
+            .single()
+          if (comp) {
+            setLocalCompany(comp)
+            if (typeof setStoreCompany === 'function') setStoreCompany(comp)
+            setLoading(false)
+            return
+          }
+        }
+      }
+
+      // Strategy 3: Fall back to store company (may lack id)
+      if (storeCompany) {
+        setLocalCompany(storeCompany)
       }
     } catch (err) {
       console.error('fetchCompany error:', err)
+      if (storeCompany) setLocalCompany(storeCompany)
     }
     setLoading(false)
   }
 
   const startEdit = () => {
+    const src = company || storeCompany || {}
     setForm({
-      name:         company?.name         || '',
-      gst_number:   company?.gst_number   || '',
-      phone:        company?.phone        || '',
-      email:        company?.email        || '',
-      city:         company?.city         || '',
-      address:      company?.address      || '',
-      bank_name:    company?.bank_name    || '',
-      bank_account: company?.bank_account || '',
-      bank_ifsc:    company?.bank_ifsc    || '',
+      name:         src.name         || '',
+      gst_number:   src.gst_number   || '',
+      phone:        src.phone        || '',
+      email:        src.email        || '',
+      city:         src.city         || '',
+      address:      src.address      || '',
+      bank_name:    src.bank_name    || '',
+      bank_account: src.bank_account || '',
+      bank_ifsc:    src.bank_ifsc    || '',
+      logo_base64:  src.logo_base64  || null,
     })
-    setLogoPreview(company?.logo_base64 || null)
+    setLogoPreview(src.logo_base64 || null)
     setEditing(true)
   }
 
   const handleLogo = e => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      showToast('error', 'Logo must be under 2MB')
-      return
-    }
+    if (file.size > 2 * 1024 * 1024) { showToast('error', 'Logo must be under 2MB'); return }
     const reader = new FileReader()
     reader.onload = ev => {
       setLogoPreview(ev.target.result)
@@ -82,10 +98,22 @@ export default function SettingsScreen() {
   }
 
   const save = async () => {
-    if (!company?.id) {
-      showToast('error', 'Company not found. Please refresh and try again.')
+    const companyId = company?.id || storeCompany?.id
+    if (!companyId) {
+      // Last resort: try to get company id fresh
+      const { data: comps } = await supabase.from('companies').select('id').limit(1)
+      if (!comps || comps.length === 0) {
+        showToast('error', 'Could not find your company. Please contact support.')
+        return
+      }
+      const freshId = comps[0].id
+      await doSave(freshId)
       return
     }
+    await doSave(companyId)
+  }
+
+  const doSave = async (id) => {
     setSaving(true)
     const payload = {
       name:         form.name,
@@ -97,20 +125,22 @@ export default function SettingsScreen() {
       bank_name:    form.bank_name,
       bank_account: form.bank_account,
       bank_ifsc:    form.bank_ifsc,
-      logo_base64:  form.logo_base64 !== undefined ? form.logo_base64 : (company?.logo_base64 || null),
+      logo_base64:  form.logo_base64 !== undefined
+                      ? form.logo_base64
+                      : (company?.logo_base64 || storeCompany?.logo_base64 || null),
     }
     const { data, error } = await supabase
       .from('companies')
       .update(payload)
-      .eq('id', company.id)
+      .eq('id', id)
       .select()
       .single()
     setSaving(false)
     if (!error && data) {
       setLocalCompany(data)
-      if (typeof setCompany === 'function') setCompany(data)
+      if (typeof setStoreCompany === 'function') setStoreCompany(data)
       setEditing(false)
-      showToast('success', 'Company profile saved!')
+      showToast('success', 'Company profile saved successfully!')
     } else {
       console.error('Save error:', error)
       showToast('error', 'Save failed: ' + (error?.message || 'Unknown error'))
@@ -119,12 +149,13 @@ export default function SettingsScreen() {
 
   const showToast = (type, msg) => {
     setToast({ type, msg })
-    setTimeout(() => setToast(null), 4000)
+    setTimeout(() => setToast(null), 5000)
   }
 
   const f   = k => form[k] ?? ''
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
-  const logo = editing ? logoPreview : company?.logo_base64
+  const logo = editing ? logoPreview : (company?.logo_base64 || storeCompany?.logo_base64)
+  const displayCompany = company || storeCompany
 
   if (loading) {
     return (
@@ -140,10 +171,11 @@ export default function SettingsScreen() {
 
   return (
     <div className="p-6 max-w-2xl">
-      {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${
-          toast.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+          toast.type === 'success'
+            ? 'bg-green-50 text-green-700 border border-green-200'
+            : 'bg-red-50 text-red-700 border border-red-200'
         }`}>
           {toast.type === 'success' ? <CheckCircle size={16}/> : <AlertCircle size={16}/>}
           {toast.msg}
@@ -167,7 +199,6 @@ export default function SettingsScreen() {
         }
       </div>
 
-      {/* Company Profile */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
         <div className="flex items-center gap-2 mb-5">
           <Building2 size={16} style={{color:'#2E6073'}}/>
@@ -175,13 +206,9 @@ export default function SettingsScreen() {
           <span className="text-xs text-gray-400 ml-1">— Used on all generated invoices</span>
         </div>
 
-        {/* Logo */}
         <div className="flex items-center gap-4 mb-5 pb-5 border-b border-gray-50">
           <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center bg-gray-50 overflow-hidden">
-            {logo
-              ? <img src={logo} alt="logo" className="w-full h-full object-contain p-1"/>
-              : <Image size={24} className="text-gray-300"/>
-            }
+            {logo ? <img src={logo} alt="logo" className="w-full h-full object-contain p-1"/> : <Image size={24} className="text-gray-300"/>}
           </div>
           <div>
             <p className="text-sm font-medium text-gray-700 mb-1">Company Logo</p>
@@ -198,29 +225,27 @@ export default function SettingsScreen() {
           </div>
         </div>
 
-        {/* Fields grid */}
         <div className="grid grid-cols-2 gap-4">
           {[
-            ['Company / Firm Name', 'name', 'text', 'full'],
-            ['Address', 'address', 'text', 'full'],
-            ['City', 'city', 'text', 'half'],
-            ['Phone / Contact', 'phone', 'text', 'half'],
-            ['GST Number', 'gst_number', 'text', 'half'],
-            ['Email', 'email', 'email', 'half'],
+            ['Company / Firm Name', 'name',        'text',  'full'],
+            ['Address',             'address',      'text',  'full'],
+            ['City',                'city',         'text',  'half'],
+            ['Phone / Contact',     'phone',        'text',  'half'],
+            ['GST Number',          'gst_number',   'text',  'half'],
+            ['Email',               'email',        'email', 'half'],
           ].map(([label, key, type, span]) => (
             <div key={key} className={span === 'full' ? 'col-span-2' : 'col-span-1'}>
               <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
               {editing
                 ? <input type={type} value={f(key)} onChange={e => set(key, e.target.value)}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"/>
-                : <p className="text-sm font-medium text-gray-800 py-1.5">{company?.[key] || <span className="text-gray-300">—</span>}</p>
+                : <p className="text-sm font-medium text-gray-800 py-1.5">{displayCompany?.[key] || <span className="text-gray-300">—</span>}</p>
               }
             </div>
           ))}
         </div>
       </div>
 
-      {/* Bank Details */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
         <div className="flex items-center gap-2 mb-4">
           <span className="text-base">🏦</span>
@@ -229,23 +254,22 @@ export default function SettingsScreen() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           {[
-            ['Bank Name', 'bank_name', 'full'],
-            ['Account Number', 'bank_account', 'half'],
-            ['IFSC Code', 'bank_ifsc', 'half'],
+            ['Bank Name',       'bank_name',    'full'],
+            ['Account Number',  'bank_account', 'half'],
+            ['IFSC Code',       'bank_ifsc',    'half'],
           ].map(([label, key, span]) => (
             <div key={key} className={span === 'full' ? 'col-span-2' : 'col-span-1'}>
               <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
               {editing
                 ? <input value={f(key)} onChange={e => set(key, e.target.value)}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"/>
-                : <p className="text-sm font-medium text-gray-800 py-1.5">{company?.[key] || <span className="text-gray-300">—</span>}</p>
+                : <p className="text-sm font-medium text-gray-800 py-1.5">{displayCompany?.[key] || <span className="text-gray-300">—</span>}</p>
               }
             </div>
           ))}
         </div>
       </div>
 
-      {/* Account */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
         <div className="flex items-center gap-2 mb-4">
           <Shield size={16} style={{color:'#F07820'}}/>
@@ -258,14 +282,8 @@ export default function SettingsScreen() {
           </div>
           <div className="flex justify-between py-1.5">
             <span className="text-xs text-gray-400">Plan</span>
-            <span className="text-sm font-medium text-gray-700">{company?.plan || '—'}</span>
+            <span className="text-sm font-medium text-gray-700">{displayCompany?.plan || '—'}</span>
           </div>
-          {company?.id && (
-            <div className="flex justify-between py-1.5">
-              <span className="text-xs text-gray-400">Company ID</span>
-              <span className="text-xs text-gray-400 font-mono">{company.id.substring(0,8)}…</span>
-            </div>
-          )}
         </div>
       </div>
 
