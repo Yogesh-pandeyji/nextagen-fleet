@@ -163,7 +163,7 @@ export default function TrackingScreen() {
         </div>
       </div>
 
-      <div className="relative bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden mb-5" style={{height:420}}>
+      <div className="relative bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden mb-5" style={{height:420, zIndex:0, isolation:'isolate'}}>
         <div ref={mapRef} style={{height:'100%', width:'100%'}} />
         {locations.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 pointer-events-none">
