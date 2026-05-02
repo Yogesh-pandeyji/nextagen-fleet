@@ -28,7 +28,7 @@ function Field({ label, value }) {
   return (
     <div>
       <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-sm font-semibold text-gray-900">{value || 'â'}</p>
+      <p className="text-sm font-semibold text-gray-900">{value || '—'}</p>
     </div>
   )
 }
@@ -104,19 +104,19 @@ export default function TripDetail() {
     }
   }
 
-  const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : 'â'
+  const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '—'
 
   return (
-    <div className="p-6 max-w3x1 relative">
+    <div className="p-6 max-w-3xl relative">
 
-      {/* Toast */}
+      {/* ── Toast ── */}
       {toast && (
         <div className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all ${toast.ok ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
           {toast.msg}
         </div>
       )}
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex items-center justify-between mb-6">
         <button onClick={() => navigate('/trips')}
           className="flex items-center gap-2 text-gray-500 hover:text-gray-800 text-sm font-medium transition-colors">
@@ -130,16 +130,18 @@ export default function TripDetail() {
         </button>
       </div>
 
-      {/* Detail Card */}
+      {/* ── Detail Card ── */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        {/* Card header stripe */}
         <div className="h-1.5 bg-gradient-to-r from-teal-500 to-teal-400" />
 
         <div className="p-6">
+          {/* Trip title row */}
           <div className="flex items-start justify-between mb-6">
             <div>
               <h1 className="text-xl font-bold text-gray-900">{trip.trip_number}</h1>
               <p className="text-sm text-gray-500 mt-0.5">
-                {trip.from_location} â {trip.to_location}
+                {trip.from_location} → {trip.to_location}
               </p>
             </div>
             <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[trip.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
@@ -147,6 +149,7 @@ export default function TripDetail() {
             </span>
           </div>
 
+          {/* Detail grid */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-5 mb-6 pb-6 border-b border-gray-100">
             <Field label="Trip Number"   value={trip.trip_number} />
             <Field label="Status"        value={trip.status} />
@@ -162,6 +165,7 @@ export default function TripDetail() {
             {trip.notes    && <Field label="Notes"    value={trip.notes} />}
           </div>
 
+          {/* Action buttons */}
           <div className="flex flex-wrap gap-3">
             {trip.status === 'Scheduled' && (
               <button onClick={markInTransit}
@@ -181,11 +185,12 @@ export default function TripDetail() {
         </div>
       </div>
 
-      {/* Edit Modal */}
+      {/* ── Edit Modal ── */}
       {editing && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
 
+            {/* Modal header */}
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Edit Trip</h2>
@@ -197,6 +202,7 @@ export default function TripDetail() {
               </button>
             </div>
 
+            {/* Modal body */}
             <div className="overflow-y-auto p-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {EDIT_FIELDS.map(f => (
@@ -213,6 +219,7 @@ export default function TripDetail() {
                   </div>
                 ))}
 
+                {/* Status select */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
                     Status
@@ -225,6 +232,7 @@ export default function TripDetail() {
                   </select>
                 </div>
 
+                {/* Notes — full width */}
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
                     Notes
@@ -239,6 +247,7 @@ export default function TripDetail() {
               </div>
             </div>
 
+            {/* Modal footer */}
             <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
               <button onClick={() => setEditing(false)}
                 className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
