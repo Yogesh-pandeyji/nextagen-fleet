@@ -54,7 +54,7 @@ function KpiCard({ icon: Icon, label, value, sub, trend, color = 'teal' }) {
   )
 }
 
-const fmt = n => n ? 'â¹' + Number(n).toLocaleString('en-IN') : 'â¹0'
+const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '₹0'
 
 function getDateRange(range, customFrom, customTo) {
   const now = new Date()
@@ -262,7 +262,7 @@ export default function AnalyticsScreen() {
               <BarChart data={monthlyData} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => 'â¹' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v)} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => '₹' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v)} />
                 <Tooltip formatter={(v, n) => [fmt(v), n === 'revenue' ? 'Revenue' : 'Expenses']} />
                 <Legend formatter={n => n === 'revenue' ? 'Revenue' : 'Expenses'} />
                 <Bar dataKey="revenue"  fill={TEAL}  radius={[4,4,0,0]} />
@@ -320,7 +320,7 @@ export default function AnalyticsScreen() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => 'â¹' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v)} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => '₹' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v)} />
               <Tooltip formatter={v => [fmt(v), 'Profit']} />
               <Area type="monotone" dataKey="profit" stroke={TEAL} strokeWidth={2} fill="url(#profitGrad)" dot={{ r: 3, fill: TEAL }} />
             </AreaChart>
