@@ -20,7 +20,7 @@ const EDIT_FIELDS = [
   { key: 'vehicle_registration',label: 'Vehicle Reg.',        col: 1 },
   { key: 'driver_name',         label: 'Driver Name',         col: 1 },
   { key: 'start_date',          label: 'Start Date',          col: 1, type: 'date' },
-  { key: 'freight_amount',      label: 'Freight Amount (â¹)',  col: 1, type: 'number' },
+  { key: 'freight_amount',      label: 'Freight Amount (₹)',  col: 1, type: 'number' },
   { key: 'distance',            label: 'Distance (km)',       col: 1, type: 'number' },
 ]
 
@@ -104,7 +104,7 @@ export default function TripDetail() {
     }
   }
 
-  const fmt = n => n ? 'â¹' + Number(n).toLocaleString('en-IN') : 'â'
+  const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : 'â'
 
   return (
     <div className="p-6 max-w3x1 relative">
