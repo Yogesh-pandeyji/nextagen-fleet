@@ -143,7 +143,7 @@ export default function AnalyticsScreen() {
   const routeMap = {}
   trips.forEach(t => {
     if (!t.from_location || !t.to_location) return
-    const key = `${t.from_location} â ${t.to_location}`
+    const key = `${t.from_location} → ${t.to_location}`
     if (!routeMap[key]) routeMap[key] = { route: key, trips: 0, revenue: 0 }
     routeMap[key].trips++
     if (t.status === 'Completed') routeMap[key].revenue += Number(t.freight_amount || 0)
