@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase'
 
 const STATUS_STYLE = {
   'Completed':  'text-green-600',
-  'In Transit': 'text-blue-600',
+  'In Transit': 'text-blue-600',h
   'Scheduled':  'text-amber-600',
   'Cancelled':  'text-red-500',
 }
@@ -158,7 +158,7 @@ export default function TripsScreen() {
                   { key: 'driver_name',          label: 'Driver Name' },
                   { key: 'driver_phone',         label: 'Driver Phone' },
                   { key: 'start_date',           label: 'Start Date', type: 'date' },
-                  { key: 'freight_amount',       label: 'Freight Amount (â¹)', type: 'number' },
+                  { key: 'freight_amount',       label: 'Freight Amount (₹)', type: 'number' },
                   { key: 'distance',             label: 'Distance (km)', type: 'number' },
                 ].map(f => (
                   <div key={f.key}>
