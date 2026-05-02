@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase'
 
 const STATUS_STYLE = {
   'Completed':  'text-green-600',
-  'In Transit': 'text-blue-600',h
+  'In Transit': 'text-blue-600',
   'Scheduled':  'text-amber-600',
   'Cancelled':  'text-red-500',
 }
@@ -60,11 +60,19 @@ export default function TripsScreen() {
 
       const trip_number = 'T' + Date.now()
       const payload = {
-        ...form,
         trip_number,
-        status: 'Scheduled',
-        company_id: cu.company_id,
-        freight_amount: form.freight_amount ? Number(form.freight_amount) : null,
+        status:               'Scheduled',
+        company_id:           cu?.company_id || null,
+        from_location:        form.from_location || null,
+        to_location:          form.to_location || null,
+        client_name:          form.client_name || null,
+        vehicle_registration: form.vehicle_registration || null,
+        driver_name:          form.driver_name || null,
+        driver_phone:         form.driver_phone || null,
+        start_date:           form.start_date || null,
+        freight_amount:       form.freight_amount ? Number(form.freight_amount) : null,
+        distance:             form.distance ? Number(form.distance) : null,
+        notes:                form.notes || null,
       }
 
       const { data, error: err } = await supabase.from('trips').insert(payload).select().single()
@@ -116,8 +124,8 @@ export default function TripsScreen() {
                 <div>
                   <p className="text-sm font-semibold text-gray-900">{t.trip_number}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {t.from_location} â {t.to_location}
-                    {t.client_name ? ` Â· ${t.client_name}` : ''}
+                    {t.from_location} → {t.to_location}
+                    {t.client_name ? ` · ${t.client_name}` : ''}
                   </p>
                 </div>
                 <span className={`text-xs font-semibold ${STATUS_STYLE[t.status] || 'text-gray-500'}`}>
