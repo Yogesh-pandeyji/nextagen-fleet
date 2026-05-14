@@ -1,219 +1,227 @@
 import { useState } from 'react'
-import { Plus, X, Truck } from 'lucide-react'
+import { Plus, X, ChevronRight, AlertCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../../store/useStore'
 import { supabase } from '../../lib/supabase'
 
-const STATUS_STYLE = {
-  'Completed':  'text-green-600',
-  'In Transit': 'text-blue-600',
-  'Scheduled':  'text-amber-600',
-  'Cancelled':  'text-red-500',
-}
-
-const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-async function sendTripNotification(event, trip, driverPhone) {
-  try {
-    if (!driverPhone) return
-    await fetch(`${SUPABASE_URL}/functions/v1/trip-notification`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON}`,
-      },
-      body: JSON.stringify({ event, trip, driver_phone: driverPhone }),
-    })
-  } catch (e) {
-    console.warn('Notification send failed:', e)
-  }
-}
-
 const EMPTY = {
   from_location: '', to_location: '', client_name: '',
   vehicle_registration: '', driver_name: '', driver_phone: '',
-  start_date: '', freight_amount: '', distance: '', notes: '',
+  start_date: '', freight_amount: '', distance_km: '', notes: '',
+  exp_fuel: '', exp_toll: '', exp_driver_allowance: '', exp_loading: '', exp_misc: '',
+}
+
+async function notifyDriver(trip, driver_phone) {
+  if (!driver_phone || !trip?.id) return
+  try {
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+    const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
+    if (!SUPABASE_URL) return
+    await fetch(`${SUPABASE_URL}/functions/v1/trip-notification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON}` },
+      body: JSON.stringify({
+        event: 'assigned',
+        driver_phone,
+        trip: {
+          trip_number: trip.trip_number, from_location: trip.from_location,
+          to_location: trip.to_location, vehicle_registration: trip.vehicle_registration,
+          client_name: trip.client_name, start_date: trip.start_date,
+          freight_amount: trip.freight_amount, distance: trip.distance_km,
+          driver_name: trip.driver_name, status: trip.status,
+        },
+      }),
+    })
+  } catch (e) {
+    console.warn('Driver notification skipped:', e.message)
+  }
 }
 
 export default function TripsScreen() {
-  const navigate            = useNavigate()
-  const { trips, addTrip, company } = useStore()
-  const [open, setOpen]     = useState(false)
+  const { trips, createTrip, vehicles, drivers, company } = useStore()
+  const [show, setShow]     = useState(false)
   const [form, setForm]     = useState(EMPTY)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState(null)
+  const navigate = useNavigate()
 
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const openModal  = () => { setForm(EMPTY); setError(null); setShow(true) }
+  const closeModal = () => { if (!saving) { setShow(false); setError(null) } }
 
-  const handleCreate = async () => {
-    if (!form.from_location || !form.to_location) {
-      setError('From and To locations are required.')
-      return
-    }
+  const submit = async e => {
+    e.preventDefault()
     setSaving(true)
     setError(null)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      const { data: cu } = await supabase
-        .from('company_users').select('company_id').eq('user_id', user.id).single()
-
-      const trip_number = 'T' + Date.now()
-      const payload = {
-        trip_number,
-        status:               'Scheduled',
-        company_id:           cu?.company_id || null,
-        from_location:        form.from_location || null,
-        to_location:          form.to_location || null,
-        client_name:          form.client_name || null,
-        vehicle_registration: form.vehicle_registration || null,
-        driver_name:          form.driver_name || null,
-        driver_phone:         form.driver_phone || null,
-        start_date:           form.start_date || null,
-        freight_amount:       form.freight_amount ? Number(form.freight_amount) : null,
-        distance:             form.distance ? Number(form.distance) : null,
-        notes:                form.notes || null,
+      const { exp_fuel, exp_toll, exp_driver_allowance, exp_loading, exp_misc, driver_phone, ...coreForm } = form
+      const tripData = await createTrip(coreForm)
+      if (!tripData?.id) {
+        setError('Trip could not be saved. Check the notification above for details.')
+        setSaving(false)
+        return
       }
-
-      const { data, error: err } = await supabase.from('trips').insert(payload).select().single()
-      if (err) throw err
-
-      addTrip(data)
-      await sendTripNotification('assigned', data, form.driver_phone)
-      setOpen(false)
+      const expRows = [
+        { expense_type: 'Fuel',              amount: exp_fuel,             description: 'Fuel cost' },
+        { expense_type: 'Toll',              amount: exp_toll,             description: 'Toll charges' },
+        { expense_type: 'Driver Allowance',  amount: exp_driver_allowance, description: 'Driver allowance' },
+        { expense_type: 'Loading/Unloading', amount: exp_loading,          description: 'Loading & unloading' },
+        { expense_type: 'Miscellaneous',     amount: exp_misc,             description: 'Miscellaneous' },
+      ].filter(r => r.amount && Number(r.amount) > 0)
+       .map(r => ({ ...r, trip_id: tripData.id, company_id: company?.id,
+         recorded_at: form.start_date ? form.start_date + 'T00:00:00Z' : new Date().toISOString() }))
+      await Promise.allSettled([
+        expRows.length > 0 ? supabase.from('trip_expenses').insert(expRows) : Promise.resolve(),
+        notifyDriver(tripData, driver_phone),
+      ])
       setForm(EMPTY)
-    } catch (e) {
-      setError(e.message || 'Failed to create trip.')
+      setShow(false)
+    } catch (err) {
+      setError(err?.message || 'Unexpected error. Please try again.')
+      console.error('Trip submit error:', err)
     } finally {
       setSaving(false)
     }
   }
 
+  const expTotal = ['exp_fuel','exp_toll','exp_driver_allowance','exp_loading','exp_misc']
+    .reduce((s, k) => s + (Number(form[k]) || 0), 0)
+
+  const statusColor = {
+    Completed: 'text-green-600 bg-green-50', 'In Transit': 'text-blue-600 bg-blue-50',
+    Scheduled: 'text-yellow-600 bg-yellow-50', Cancelled: 'text-red-500 bg-red-50',
+  }
+
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Trips</h1>
-          <p className="text-sm text-gray-400 mt-0.5">{trips.length} trips total</p>
+          <h1 className="text-xl font-bold text-gray-800">Trips</h1>
+          <p className="text-sm text-gray-500">{trips.length} trips total</p>
         </div>
-        <button
-          onClick={() => { setOpen(true); setForm(EMPTY); setError(null) }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white text-sm font-semibold rounded-xl hover:bg-teal-700 transition-colors shadow-sm"
-        >
-          <Plus size={16} />
-          New Trip
+        <button onClick={openModal} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-semibold" style={{background:'#2E6073'}}>
+          <Plus size={16}/> New Trip
         </button>
       </div>
 
-      {/* Trip list */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        {trips.length === 0 ? (
-          <div className="p-12 text-center">
-            <Truck size={36} className="mx-auto text-gray-200 mb-3" />
-            <p className="text-gray-400 text-sm">No trips yet. Create your first trip.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {trips.map(t => (
-              <div
-                key={t.id}
-                onClick={() => navigate(`/trips/${t.id}`)}
-                className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">{t.trip_number}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {t.from_location} → {t.to_location}
-                    {t.client_name ? ` · ${t.client_name}` : ''}
-                  </p>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        {trips.length === 0 && <div className="p-12 text-center text-gray-400 text-sm">No trips yet. Create your first trip!</div>}
+        <div className="divide-y divide-gray-50">
+          {trips.map(t => (
+            <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer" onClick={() => navigate('/trips/' + t.id)}>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-gray-800">{t.trip_number}</div>
+                <div className="text-xs text-gray-500 mt-0.5 truncate">
+                  {t.from_location} &rarr; {t.to_location}
+                  {t.client_name && <span className="text-gray-400"> &middot; {t.client_name}</span>}
                 </div>
-                <span className={`text-xs font-semibold ${STATUS_STYLE[t.status] || 'text-gray-500'}`}>
-                  {t.status}
-                </span>
+                <div className="text-xs text-gray-400">{t.vehicle_registration || t.vehicle_reg || '-'} &middot; {t.driver_name || '-'}</div>
               </div>
-            ))}
-          </div>
-        )}
+              <div className="flex items-center gap-3 ml-4 shrink-0">
+                <div className="text-right">
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusColor[t.status] || 'text-gray-500 bg-gray-100'}`}>{t.status}</span>
+                  {Number(t.freight_amount) > 0 && <div className="text-xs text-gray-500 mt-1">&#8377;{Number(t.freight_amount).toLocaleString('en-IN')}</div>}
+                </div>
+                <ChevronRight size={14} className="text-gray-300"/>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* New Trip Modal */}
-      {open && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-
-            {/* Modal header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900">New Trip</h2>
-              <button onClick={() => setOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-                <X size={18} className="text-gray-500" />
-              </button>
+      {show && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-gray-800 text-base">New Trip</h2>
+              <button onClick={closeModal} disabled={saving}><X size={18} className="text-gray-400"/></button>
             </div>
 
-            {/* Modal body */}
-            <div className="overflow-y-auto p-6">
-              {error && (
-                <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">
-                  {error}
-                </div>
-              )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {error && (
+              <div className="flex items-start gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                <AlertCircle size={14} className="shrink-0 mt-0.5"/>
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form onSubmit={submit} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
                 {[
-                  { key: 'from_location',        label: 'From Location *' },
-                  { key: 'to_location',          label: 'To Location *' },
-                  { key: 'client_name',          label: 'Client Name' },
-                  { key: 'vehicle_registration', label: 'Vehicle Registration' },
-                  { key: 'driver_name',          label: 'Driver Name' },
-                  { key: 'driver_phone',         label: 'Driver Phone' },
-                  { key: 'start_date',           label: 'Start Date', type: 'date' },
-                  { key: 'freight_amount',       label: 'Freight Amount (₹)', type: 'number' },
-                  { key: 'distance',             label: 'Distance (km)', type: 'number' },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
-                      {f.label}
-                    </label>
-                    <input
-                      type={f.type || 'text'}
-                      value={form[f.key] || ''}
-                      onChange={e => set(f.key, e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
-                    />
+                  ['FROM LOCATION *','from_location','text',true],
+                  ['TO LOCATION *','to_location','text',true],
+                  ['CLIENT NAME','client_name','text',false],
+                  ['VEHICLE REGISTRATION','vehicle_registration','text',false],
+                  ['DRIVER NAME','driver_name','text',false],
+                  ['DRIVER PHONE','driver_phone','tel',false],
+                  ['START DATE *','start_date','date',true],
+                  ['FREIGHT AMOUNT (\u20b9)','freight_amount','number',false],
+                ].map(([label,key,type,required]) => (
+                  <div key={key}>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1 tracking-wide">{label}</label>
+                    <input type={type} value={form[key]} onChange={e => set(key, e.target.value)} required={required}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"/>
                   </div>
                 ))}
-
-                {/* Notes - full width */}
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
-                    Notes
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={form.notes || ''}
-                    onChange={e => set('notes', e.target.value)}
-                    className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all resize-none"
-                  />
-                </div>
               </div>
-            </div>
 
-            {/* Modal footer */}
-            <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
-              <button
-                onClick={() => setOpen(false)}
-                className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 text-white text-sm font-semibold rounded-xl hover:bg-teal-700 disabled:opacity-50 transition-colors shadow-sm"
-              >
-                <Plus size={15} />
-                {saving ? 'Creating...' : 'Create Trip'}
-              </button>
-            </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1 tracking-wide">DISTANCE (KM)</label>
+                <input type="number" value={form.distance_km} onChange={e => set('distance_km', e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"/>
+              </div>
+
+              {vehicles.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 tracking-wide">SELECT VEHICLE</label>
+                  <select value={form.vehicle_registration} onChange={e => set('vehicle_registration', e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    <option value="">Choose from registered vehicles</option>
+                    {vehicles.map(v => <option key={v.id} value={v.registration_no}>{v.registration_no}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {drivers.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 tracking-wide">SELECT DRIVER</label>
+                  <select value={form.driver_name} onChange={e => {
+                    const d = drivers.find(dr => dr.name === e.target.value)
+                    set('driver_name', e.target.value)
+                    if (d?.phone && !form.driver_phone) set('driver_phone', d.phone)
+                  }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    <option value="">Choose from registered drivers</option>
+                    {drivers.map(d => <option key={d.id} value={d.name}>{d.name}{d.phone ? ' · '+d.phone : ''}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1 tracking-wide">NOTES</label>
+                <input type="text" value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Optional remarks"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"/>
+              </div>
+
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold text-gray-700 mb-2">TRIP EXPENSES <span className="font-normal text-gray-400">(optional)</span></p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[['Fuel (\u20b9)','exp_fuel'],['Toll (\u20b9)','exp_toll'],['Driver Allowance (\u20b9)','exp_driver_allowance'],['Loading/Unloading (\u20b9)','exp_loading'],['Miscellaneous (\u20b9)','exp_misc']].map(([label,key]) => (
+                    <div key={key}>
+                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                      <input type="number" min="0" value={form[key]} onChange={e => set(key, e.target.value)} placeholder="0"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"/>
+                    </div>
+                  ))}
+                </div>
+                {expTotal > 0 && <div className="mt-2 text-right text-xs font-semibold text-gray-700">Total: &#8377;{expTotal.toLocaleString('en-IN')}</div>}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeModal} disabled={saving} className="flex-1 py-2.5 border border-gray-200 rounded-lg text-sm disabled:opacity-50">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold disabled:opacity-60 flex items-center justify-center gap-2" style={{background:'#2E6073'}}>
+                  {saving ? (<><svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>Creating…</>) : (<><Plus size={14}/> Create Trip</>)}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
